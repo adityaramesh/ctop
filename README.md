@@ -7,6 +7,6 @@
 
 # Introduction
 
-`ctop` is a C++ library that allows you to analyze CPU topology information
-obtained from the `CPUID` instruction. This information is useful to have in
-multithreaded applications.
+`ctop` is a C++ library that allows you to analyze system topology information.
+Much of this information is obtained from the `CPUID` instruction. This
+information is useful to have in multithreaded applications.
