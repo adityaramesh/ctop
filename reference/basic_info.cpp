@@ -52,6 +52,6 @@ int main()
 	}
 
 	// TODO: determine the APIC ID of each logical processor. How about NUMA
-	// affinity? Test this on savina.
+	// affinity?
 	cc::println("APIC ID: $.", apic_id);
 }

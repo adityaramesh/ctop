@@ -892,17 +892,20 @@ if expand('%') == '' && !&modified && line('$') <= 1 && getline(1) == ''
   let s:wipebuf = bufnr('%')
 endif
 set shortmess=aoO
-badd +51 include/ctop/processor.hpp
-badd +12 include/ctop/processor_query.hpp
-badd +1 include/ctop/system.hpp
-badd +13 include/ctop/vendor.hpp
-badd +33 test/basic_info.cpp
+badd +265 include/ctop/system.hpp
+badd +99 include/ctop/system_query.hpp
+badd +54 include/ctop/cpuid.hpp
+badd +16 include/ctop/vendor.hpp
+badd +22 test/basic_info.cpp
+badd +13 test/system_query_test.cpp
+badd +0 test/os_x/thread_test.cpp
+badd +0 include/ctop/mach_thread.hpp
 argglobal
 silent! argdel *
-argadd ~/projects/c++/ctop/include/ctop/processor.hpp
-argadd ~/projects/c++/ctop/include/ctop/processor_query.hpp
 argadd ~/projects/c++/ctop/include/ctop/system.hpp
-edit include/ctop/processor_query.hpp
+argadd ~/projects/c++/ctop/include/ctop/system_query.hpp
+argadd ~/projects/c++/ctop/include/ctop/cpuid.hpp
+edit include/ctop/mach_thread.hpp
 set splitbelow splitright
 wincmd _ | wincmd |
 vsplit
@@ -914,7 +917,7 @@ set winheight=1 winwidth=1
 exe 'vert 1resize ' . ((&columns * 101 + 102) / 204)
 exe 'vert 2resize ' . ((&columns * 102 + 102) / 204)
 argglobal
-edit include/ctop/processor_query.hpp
+edit include/ctop/mach_thread.hpp
 nnoremap <buffer> <silent> 	 :python updateSnips()
 xnoremap <buffer> <silent> 	 :python updateSnips()
 onoremap <buffer> <silent> 	 :python updateSnips()
@@ -1024,16 +1027,15 @@ setlocal nowinfixwidth
 setlocal wrap
 setlocal wrapmargin=0
 silent! normal! zE
-let s:l = 52 - ((47 * winheight(0) + 26) / 52)
+let s:l = 38 - ((25 * winheight(0) + 26) / 52)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-52
-normal! 0
+38
+normal! 061|
 wincmd w
 argglobal
-edit test/basic_info.cpp
-snoremap <buffer> <silent> 	 :python updateSnips()
+edit test/os_x/thread_test.cpp
 nnoremap <buffer> <silent> 	 :python updateSnips()
 xnoremap <buffer> <silent> 	 :python updateSnips()
 onoremap <buffer> <silent> 	 :python updateSnips()
@@ -1143,13 +1145,14 @@ setlocal nowinfixwidth
 setlocal wrap
 setlocal wrapmargin=0
 silent! normal! zE
-let s:l = 36 - ((30 * winheight(0) + 26) / 52)
+let s:l = 24 - ((23 * winheight(0) + 26) / 52)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-36
-normal! 09|
+24
+normal! 043|
 wincmd w
+2wincmd w
 exe 'vert 1resize ' . ((&columns * 101 + 102) / 204)
 exe 'vert 2resize ' . ((&columns * 102 + 102) / 204)
 tabnext 1
