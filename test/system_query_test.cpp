@@ -10,5 +10,9 @@
 
 int main()
 {
-	cc::println(ctop::system_query().get());
+	auto pkg = ctop::system_query().get();
+	cc::println(pkg);
+	for (auto i = 0; i != pkg.caches(); ++i) {
+		cc::println(pkg.cache(i));
+	}
 }
