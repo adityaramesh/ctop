@@ -9,13 +9,17 @@
 #define Z107EBA55_0D42_4C6A_9B3E_247F273597DE
 
 #include <array>
-#include <cstring>
 #include <algorithm>
+#include <stdexcept>
+#include <cstring>
 
 #include <boost/lexical_cast.hpp>
+#include <boost/scope_exit.hpp>
 #include <ccbase/error.hpp>
+
 #include <ctop/cpuid.hpp>
 #include <ctop/cpuid_error.hpp>
+#include <ctop/numa_error.hpp>
 #include <ctop/system.hpp>
 
 #if PLATFORM_KERNEL == PLATFORM_KERNEL_LINUX
@@ -34,7 +38,7 @@
 namespace ctop {
 
 cc::expected<void>
-get_basic_info(processor_package& pkg)
+get_basic_cpu_info(global_cpu_info& info)
 {
 	auto buf = std::array<char, 13>{};
 	auto regs = (uint32_t*)buf.data();
@@ -50,13 +54,13 @@ get_basic_info(processor_package& pkg)
 	std::tie(eax, ebx, edx, ecx) = cpuid(cpuid_leaf::basic_info);
 
 	if (vendor_str == "GenuineIntel") {
-		pkg.vendor(vendor::intel);
+		info.version().vendor(cpu_vendor::intel);
 	}
 	else if (vendor_str == "AuthenticAMD") {
-		pkg.vendor(vendor::amd);
+		info.version().vendor(cpu_vendor::amd);
 	}
 	else {
-		pkg.vendor(vendor::unknown);
+		info.version().vendor(cpu_vendor::unknown);
 	}
 
 	/*
@@ -71,70 +75,37 @@ get_basic_info(processor_package& pkg)
 	auto ext_model  = (eax >> 16) & 0xF;
 	auto ext_family = (eax >> 20) & 0xFF;
 
-	pkg.version().type(static_cast<processor_type>(type));
-	pkg.version().stepping(stepping);
+	info.version().type(static_cast<cpu_type>(type));
+	info.version().stepping(stepping);
 
 	/*
-	** See the instruction reference manual for why we do thipkg.
+	** See the instruction reference manual for why we do do not directly
+	** store the values reported by CPUID.
 	*/
 	if (family != 0xF) {
-		pkg.version().family(family);
+		info.version().family(family);
 	}
 	else {
-		pkg.version().family(ext_family + family);
+		info.version().family(ext_family + family);
 	}
 
 	if (family == 0x6 || family == 0xF) {
-		pkg.version().model((ext_model << 4) + model);
+		info.version().model((ext_model << 4) + model);
 	}
 	else {
-		pkg.version().model(model);
+		info.version().model(model);
 	}
-
-	/*
-	** This method for determining whether the processor supports SMT is
-	** unreliable, because it does not report whether hyperthreading was
-	** disabled in the BIOS. Some propcessors also output false information.
-	**
-	** Retrieve the information about physical and logical processor count.
-	**
-	** static constexpr auto htt_bit = uint32_t{1 << 28};
-	** pkg.uses_smt(edx & htt_bit);
-	*/
-
-	/*
-	** This method is unreliable, because different caches could potentially
-	** have different line sizes.
-	**
-	** pkg.cache_line_size(8 * ((ebx >> 8) & 0xFF));
-	*/
-
-	/*
-	** This method reports the number of slots reserved for APIC IDs, which
-	** does not necessarily correspond to the maximum number of logical
-	** processors. For example, it can return 16 when the actual number of
-	** logical processors is 8.
-	**
-	** if (htt_supported) {
-	** 	auto max_ids = (ebx >> 16) & 0xFF;
-	** 	pkg.max_threads(max_ids);
-	** 	pkg.max_cores(max_ids / 2);
-	** }
-	** else {
-	** 	pkg.max_threads(1);
-	** 	pkg.max_cores(1);
-	** }
-	*/
 
 	/*
 	** Retrieve the brand information and the base frequency.
 	*/
-	std::tie(eax, ebx, ecx, edx) = cpuid(cpuid_leaf::max_extended_leaf);
+	static const auto _ = std::ignore;
+	std::tie(eax, _, _, _) = cpuid(cpuid_leaf::max_extended_leaf);
 	if (eax < 0x80000004u) {
 		return cpuid_error{cpuid_leaf::brand_string_part_1, "unsupported"};
 	}
 
-	auto brand_buf = pkg.version().brand();
+	auto brand_buf = info.version().brand();
 	auto p = (uint32_t*)brand_buf.begin();
 	std::tie(p[0], p[1], p[2], p[3])   = cpuid(cpuid_leaf::brand_string_part_1);
 	std::tie(p[4], p[5], p[6], p[7])   = cpuid(cpuid_leaf::brand_string_part_2);
@@ -153,8 +124,8 @@ get_basic_info(processor_package& pkg)
 			"brand string is not null-terminated"};
 	}
 
-	pkg.version().brand_offset(beg);
-	auto brand_str = pkg.version().brand();
+	info.version().brand_offset(beg);
+	auto brand_str = info.version().brand();
 
 	/*
 	** Extract the base frequency.
@@ -190,13 +161,13 @@ get_basic_info(processor_package& pkg)
 
 	auto units_str = brand_str.substr(units, 3);
 	if (units_str == "MHz") {
-		pkg.version().base_frequency(sig);
+		info.version().base_frequency(sig);
 	}
 	else if (units_str == "GHz") {
-		pkg.version().base_frequency(1000 * sig);
+		info.version().base_frequency(1000 * sig);
 	}
 	else if (units_str == "THz") {
-		pkg.version().base_frequency(1000000 * sig);
+		info.version().base_frequency(1000000 * sig);
 	}
 	else {
 		return cpuid_error{cpuid_leaf::brand_string_part_1,
@@ -206,29 +177,104 @@ get_basic_info(processor_package& pkg)
 }
 
 cc::expected<void>
-get_cache_info(processor_package& pkg)
+get_cpu_layout_info(global_cpu_info& info)
 {
+	static constexpr auto leaf = cpuid_leaf::enumerable_topology_info;
+	static const auto _ = std::ignore;
+	uint32_t eax, ebx, ecx;
+	uint32_t smt_count;
+	auto level = 0;
+	auto checked = 0;
+
+	for (;;) {
+		std::tie(eax, ebx, ecx, _) = cpuid(leaf, level);
+		auto shift = eax & 0x1F;
+		auto count = ebx & 0xFFFF;
+		auto type  = (ecx >> 8) & 0xFF;
+
+		if (type == 0) {
+			break;
+		}
+		else if (count == 0) {
+			return cpuid_error{leaf, "obtained logical processor "
+				"count of zero"};
+		}
+
+		if (type == 1) {
+			info.smt_id_bits(count);
+			smt_count = count;
+			if (smt_count > 2) {
+				return cpuid_error{leaf, "obtained count of "
+					"more than two SMTs per core"};
+			}
+			++checked;
+		}
+		else if (type == 2) {
+			info.core_id_bits(shift);
+			info.total_threads(count);
+			++checked;
+		}
+		else {
+			return cpuid_error{leaf, "unknown level type"};
+		}
+		++level;
+	}
+
+	if (checked != 2) {
+		return cpuid_error{leaf, "did not encounter both levels one "
+			"and two"};
+	}
+	if (info.smt_id_bits() + info.core_id_bits() > 32) {
+		return cpuid_error{leaf, "sub-ID shift widths sum to number "
+			"greater than 32"};
+	}
+	if (smt_count > info.total_threads()) {
+		return cpuid_error{leaf, "SMT count greater than thread count"};
+	}
+	if (info.total_threads() % smt_count != 0) {
+		return cpuid_error{leaf, "total thread count not divisible by "
+			"number of threads per core"};
+	}
+	info.package_id_bits(32 - info.smt_id_bits() - info.core_id_bits());
+	info.total_cores(info.total_threads() / smt_count);
+	return true;
+}
+
+cc::expected<void>
+get_cpu_cache_info(global_cpu_info& info)
+{
+	static constexpr auto leaf = cpuid_leaf::enumerable_cache_info;
 	auto level = 1;
 	uint32_t eax, ebx, ecx, edx;
-	std::tie(eax, ebx, ecx, edx) = cpuid(cpuid_leaf::enumerable_cache_info, 0);
+	std::tie(eax, ebx, ecx, edx) = cpuid(leaf, 0);
 
 	for (;;) {
 		auto type = eax & 0x1F;
-		auto c = cache{};
+		auto c = cpu_cache{};
 
 		switch (type) {
 		case 0: return true;
 		case 1: c.type(cache_type::data);        break;
 		case 2: c.type(cache_type::instruction); break;
 		case 3: c.type(cache_type::unified);     break;
-		default: return cpuid_error{cpuid_leaf::enumerable_cache_info,
-			 "encountered unknown cache type"};
+		default: return cpuid_error{leaf, "encountered unknown cache type"};
 		}
 
 		c.level((eax >> 5) & 0x7);
 		c.is_self_initializing((eax >> 8) & 0x1);
 		c.is_fully_associative((eax >> 9) & 0x1);
-		c.sharing_threads((eax >> 14) & 0xFFF);
+
+		auto sharing_ids = ((eax >> 14) & 0xFFF) + 1;
+		auto res_core_ids = (eax >> 26) + 1;
+		if (sharing_ids == info.threads_per_core()) {
+			c.scope(cpu_topology_level::core);
+		}
+		else if (sharing_ids == info.threads_per_core() * res_core_ids) {
+			c.scope(cpu_topology_level::processor);
+		}
+		else {
+			return cpuid_error{leaf, "failed to determine scope of cache"};
+		}
 
 		c.line_size((ebx & 0xFFF) + 1);
 		c.line_partitions(((ebx >> 12) & 0x3FF) + 1);
@@ -240,7 +286,7 @@ get_cache_info(processor_package& pkg)
 		c.is_inclusive((edx >> 1) & 0x1);
 		c.is_direct_mapped((edx >> 2) & 0x1);
 
-		pkg.add_cache(c);
+		info.add(c);
 		std::tie(eax, ebx, ecx, edx) = cpuid(cpuid_leaf::enumerable_cache_info, level);
 		++level;
 	}
@@ -248,77 +294,207 @@ get_cache_info(processor_package& pkg)
 }
 
 cc::expected<void>
-get_count_info(processor_package& pkg)
+get_global_info(system_info& info)
 {
-	uint32_t eax, ebx, ecx, edx;
-	std::tie(eax, ebx, ecx, edx) = cpuid(cpuid_leaf::enumerable_topology_info, 0);
-	auto count = ebx & 0xFFFF;
-	auto type = (ecx >> 8) & 0xFF;
-
-	if (pkg.uses_smt()) {
-		if (type != 1 || count != 2) {
-			return cpuid_error{cpuid_leaf::enumerable_topology_info,
-				"expected level zero to have type \"SMT\" and a "
-				"logical processor count of two"};
+	auto& cpu = info.cpu_info();
+	{
+		auto r = get_basic_cpu_info(cpu);
+		cc::println("A");
+		if (!r) {
+			try {
+				std::rethrow_exception(r.exception());
+			}
+			catch (const std::exception& e) {
+				std::cout << e.what() << std::endl;
+			}
+			return r.exception();
 		}
 	}
-	else {
-		if (type != 2) {
-			return cpuid_error{cpuid_leaf::enumerable_topology_info,
-				"expected level zero to have type \"core\""};
+	{
+		auto r = get_cpu_layout_info(cpu);
+		cc::println("B");
+		if (!r) {
+			return r.exception();
 		}
-
-		pkg.max_cores(count);
-		pkg.max_threads(count);
-		return true;
 	}
-
-	std::tie(eax, ebx, ecx, edx) = cpuid(cpuid_leaf::enumerable_topology_info, 1);
-	count = ebx & 0xFFFF;
-	type = (ecx >> 8) & 0xFF;
-
-	if (type != 2) {
-		return cpuid_error{cpuid_leaf::enumerable_topology_info,
-			"expected level one to have type \"core\""};
+	{
+		auto r = get_cpu_cache_info(cpu);
+		cc::println("C");
+		if (!r) {
+			return r.exception();
+		}
 	}
-	if (count % 2 != 0) {
-		return cpuid_error{cpuid_leaf::enumerable_topology_info,
-			"expected logical processor count to be even"};
-	}
-
-	pkg.max_threads(count);
-	pkg.max_cores(count / 2);
 	return true;
 }
-
-#if PLATFORM_COMPILER == PLATFORM_COMPILER_GCC || \
-    PLATFORM_COMPILER == PLATFORM_COMPILER_CLANG || \
-    PLATFORM_COMPILER == PLATFORM_COMPILER_ICC
-
-CC_CONST CC_ALWAYS_INLINE uint32_t 
-next_power_of_two(uint32_t x)
-{
-	return 1 << (32 - __builtin_clz(x - 1));
-}
-
-#else
-	#error "Unsupported compiler."
-#endif
-
-#if PLATFORM_KERNEL == PLATFORM_KERNEL_LINUX
 
 cc::expected<void>
-get_topology_info(processor_package& pkg)
+get_inventory(system_info& info)
 {
-	// TODO
+	if (::numa_available() == -1) {
+		return numa_error{"libnuma unavailable"};
+	}
+
+	auto count = 0;
+
+	count = ::numa_num_configured_nodes();
+	if (count <= 0) {
+		return numa_error{"failed to get total NUMA node count"};
+	}
+	info.total_numa_nodes(count);
+
+	count = ::numa_num_task_nodes();
+	if (count <= 0) {
+		return numa_error{"failed to get available NUMA node count"};
+	}
+	if ((uint32_t)count > info.total_numa_nodes()) {
+		return numa_error{"libnuma reports more available NUMA nodes "
+			"than configured NUMA nodes"};
+	}
+	info.available_numa_nodes(count);
+
+	if ((uint32_t)::numa_num_configured_cpus() != info.total_cpu_threads()) {
+		return numa_error{"total CPU count disagrees with information "
+			"reported by libnuma"};
+	}
+
+	count = ::numa_num_task_cpus();
+	if (count <= 0) {
+		return numa_error{"failed to get available CPU thread count"};
+	}
+	if ((uint32_t)count > info.total_cpu_threads()) {
+		return numa_error{"libnuma reports more available CPU threads "
+			"than total CPU threads"};
+	}
+	info.available_cpu_threads(count);
 	return true;
 }
 
-#else
-	#error "Unsupported kernel."
-#endif
+cc::expected<void>
+get_cpu_topology_info(
+	uint32_t&       cur_thread_count,
+	struct bitmask* cpus,
+	struct bitmask* cur_cpu,
+	numa_node_info& node,
+	system_info&    info
+)
+{
+	static constexpr auto leaf = cpuid_leaf::enumerable_topology_info;
+	static const auto _ = std::ignore;
 
-cc::expected<processor_package>
+	if (::numa_node_to_cpus(node.id(), cpus) == -1) {
+		if (errno == ERANGE) {
+			return numa_error{node.id(), "node contains more CPU "
+				"threads than expected"};
+		}
+		else {
+			auto msg = cc::format("failed to get CPU thread IDs of "
+				"node: $", std::strerror(errno));
+			return numa_error{node.id(), std::move(msg)};
+		}
+	}
+
+	auto avail_threads = ::numa_bitmask_weight(cpus);
+	if (avail_threads == 0) {
+		return numa_error{node.id(), "node reported accessible but "
+			"contains no usable CPU threads"};
+	}
+	if (cur_thread_count + avail_threads > info.available_cpu_threads()) {
+		return numa_error{"more CPU threads available than reported"};
+	}
+
+	node.cpu_info().available_threads(avail_threads);
+	node.cpu_info().thread_data(&info.cpu_thread_info(cur_thread_count));
+	cur_thread_count += avail_threads;
+
+	for (auto i = 0u; i != info.total_cpu_threads(); ++i) {
+		if (::numa_bitmask_isbitset(cpus, i)) {
+			::numa_bitmask_setbit(cur_cpu, i);
+			if (::numa_sched_setaffinity(0, cur_cpu) == -1) {
+				auto msg = cc::format("failed to schedule "
+					"thread on CPU $: $", i,
+					std::strerror(errno));
+				return numa_error{node.id(), msg};
+			}
+
+			auto& thread = node.cpu_info().thread_info(i);
+			thread.os_id(i);
+			std::tie(_, _, _, thread.x2apic_id()) = cpuid(leaf, 0);
+
+			::numa_bitmask_clearbit(cur_cpu, i);
+		}
+	}
+
+	// TODO set SMT field of CPU
+	// TODO sort the subrange of thread info objects
+	return true;
+}
+
+cc::expected<void>
+get_numa_topology_info(system_info& info)
+{
+	auto max_node = ::numa_max_possible_node();
+	if (max_node <= 0) {
+		return numa_error{"failed to get maximum NUMA node number"};
+	}
+
+	auto nodes = ::numa_all_nodes_ptr;
+	auto cpus = ::numa_bitmask_alloc(info.total_cpu_threads());
+	auto cur_cpu = ::numa_bitmask_alloc(info.total_cpu_threads());
+
+	BOOST_SCOPE_EXIT_ALL(&) {
+		if (cpus != nullptr) {
+			::numa_bitmask_free(cpus);
+		}
+		if (cur_cpu != nullptr) {
+			::numa_bitmask_free(cur_cpu);
+		}
+	};
+
+	if (::numa_bitmask_weight(nodes) != info.available_numa_nodes()) {
+		return numa_error{"conflicting available node counts"};
+	}
+	if (cpus == nullptr || cur_cpu == nullptr) {
+		return numa_error{"failed to allocate bitmask"};
+	}
+
+	auto cur_thread_count = uint32_t{};
+	for (auto i = 0; i != max_node; ++i) {
+		if (::numa_bitmask_isbitset(nodes, i)) {
+			auto& node = info.numa_node_info(i).id(i);
+			auto r = get_cpu_topology_info(cur_thread_count, cpus,
+				cur_cpu, node, info);
+			if (!r) {
+				return r.exception();
+			}
+		}
+	}
+
+	if (cur_thread_count != info.available_cpu_threads()) {
+		return numa_error{"number of CPU threads actually accessible "
+			"does not match reported count"};
+	}
+	return true;
+}
+
+cc::expected<void>
+get_numa_info(system_info& info)
+{
+	{
+		auto r = get_inventory(info);
+		if (!r) {
+			return r.exception();
+		}
+	}
+	{
+		auto r = get_numa_topology_info(info);
+		if (!r) {
+			return r.exception();
+		}
+	}
+	return true;
+}
+
+cc::expected<system_info>
 system_query()
 {
 	auto m = max_cpuid_leaf();
@@ -330,24 +506,17 @@ system_query()
 			"unsupported"};
 	}
 
-	auto pkg = processor_package{};
+	auto info = system_info{};
 	{
-		auto r = get_basic_info(pkg);
+		auto r = get_global_info(info);
+		cc::println(r.valid());
 		if (!r) return r.exception();
 	}
 	{
-		auto r = get_cache_info(pkg);
+		auto r = get_numa_info(info);
 		if (!r) return r.exception();
 	}
-	{
-		auto r = get_count_info(pkg);
-		if (!r) return r.exception();
-	}
-	{
-		auto r = get_topology_info(pkg);
-		if (!r) return r.exception();
-		return r.get();
-	}
+	return info;
 }
 
 }

@@ -9,12 +9,12 @@
 #define Z81EA1B11_A653_467B_BFC2_F5F532D5D3F8
 
 #include <array>
-#include <ostream>
 #include <vector>
+#include <ostream>
+
 #include <boost/utility/string_ref.hpp>
 #include <ccbase/format.hpp>
 #include <ccbase/utility.hpp>
-#include <ctop/vendor.hpp>
 
 #if PLATFORM_KERNEL == PLATFORM_KERNEL_LINUX
 	#include <numa.h>
@@ -24,28 +24,21 @@
 
 namespace ctop {
 
-enum class processor_type
+enum class cpu_vendor : uint8_t
 {
-	original_oem    = 0x0,
-	intel_overdrive = 0x1,
-	dual_processor  = 0x2,
-	reserved        = 0x3,
+	intel,
+	amd,
+	unknown,
 };
 
-std::ostream& operator<<(std::ostream& os, const processor_type& t)
+std::ostream& operator<<(std::ostream& os, const cpu_vendor& v)
 {
-	switch (t) {
-	case processor_type::original_oem:
-		cc::write(os, "\"Original OEM\"");
+	switch (v) {
+	case cpu_vendor::intel:
+		cc::write(os, "Intel");
 		return os;
-	case processor_type::intel_overdrive:
-		cc::write(os, "\"Intel OverDrive\"");
-		return os;
-	case processor_type::dual_processor:
-		cc::write(os, "\"Dual Processor\"");
-		return os;
-	case processor_type::reserved:
-		cc::write(os, "\"Reserved\"");
+	case cpu_vendor::amd:
+		cc::write(os, "AMD");
 		return os;
 	default:
 		cc::write(os, "unknown");
@@ -53,45 +46,112 @@ std::ostream& operator<<(std::ostream& os, const processor_type& t)
 	}
 }
 
-class processor_version
+enum class cpu_type : uint8_t
+{
+	original_oem    = 0x0,
+	intel_overdrive = 0x1,
+	dual_processor  = 0x2,
+	reserved        = 0x3,
+};
+
+std::ostream& operator<<(std::ostream& os, const cpu_type& t)
+{
+	switch (t) {
+	case cpu_type::original_oem:
+		cc::write(os, "Original OEM");
+		return os;
+	case cpu_type::intel_overdrive:
+		cc::write(os, "Intel OverDrive");
+		return os;
+	case cpu_type::dual_processor:
+		cc::write(os, "Dual Processor");
+		return os;
+	case cpu_type::reserved:
+		cc::write(os, "Reserved");
+		return os;
+	default:
+		cc::write(os, "unknown");
+		return os;
+	}
+}
+
+class cpu_version final
 {
 	static constexpr auto brand_length = 48;
 
-	std::array<char, brand_length> m_brand{};
-	double m_base_freq_mhz{};
+	double m_base_freq_mhz;
+	cpu_vendor m_vendor;
+	cpu_type m_type;
 	uint8_t m_brand_off{};
-	uint8_t m_family{};
-	uint8_t m_model{};
-	uint8_t m_stepping{};
-	processor_type m_type{};
+	uint8_t m_family;
+	uint8_t m_model;
+	uint8_t m_stepping;
+	std::array<char, brand_length> m_brand;
 public:
-	explicit processor_version() noexcept {}
+	explicit cpu_version() noexcept {}
 
 	boost::string_ref brand()
 	{
-		return {m_brand.data() + m_brand_off, (size_t)(brand_length - m_brand_off)};
+		return {
+			m_brand.data() + m_brand_off,
+			(size_t)(brand_length - m_brand_off)
+		};
 	}
 
 	const boost::string_ref brand() const
 	{
-		return {m_brand.data() + m_brand_off, (size_t)(brand_length - m_brand_off)};
+		return {
+			m_brand.data() + m_brand_off,
+			(size_t)(brand_length - m_brand_off)
+		};
 	}
 
-	DEFINE_COPY_GETTER_SETTER(processor_version, base_frequency, m_base_freq_mhz)
-	DEFINE_COPY_GETTER_SETTER(processor_version, brand_offset, m_brand_off)
-	DEFINE_COPY_GETTER_SETTER(processor_version, family, m_family)
-	DEFINE_COPY_GETTER_SETTER(processor_version, model, m_model)
-	DEFINE_COPY_GETTER_SETTER(processor_version, stepping, m_stepping)
-	DEFINE_COPY_GETTER_SETTER(processor_version, type, m_type)
+	DEFINE_COPY_GETTER_SETTER(cpu_version, base_frequency, m_base_freq_mhz)
+	DEFINE_COPY_GETTER_SETTER(cpu_version, vendor, m_vendor)
+	DEFINE_COPY_GETTER_SETTER(cpu_version, type, m_type)
+	DEFINE_COPY_GETTER_SETTER(cpu_version, brand_offset, m_brand_off)
+	DEFINE_COPY_GETTER_SETTER(cpu_version, family, m_family)
+	DEFINE_COPY_GETTER_SETTER(cpu_version, model, m_model)
+	DEFINE_COPY_GETTER_SETTER(cpu_version, stepping, m_stepping)
 };
 
-std::ostream& operator<<(std::ostream& os, const processor_version& v)
+std::ostream& operator<<(std::ostream& os, const cpu_version& v)
 {
 	cc::write(os, v.brand());
 	return os;
 }
 
-enum class cache_type
+enum class cpu_topology_level : uint8_t
+{
+	thread,
+	core,
+	processor,
+};
+
+std::ostream& operator<<(std::ostream& os, const cpu_topology_level& t)
+{
+	switch (t) {
+	case cpu_topology_level::thread:
+		cc::write(os, "thread");
+		return os;
+	case cpu_topology_level::core:
+		cc::write(os, "core");
+		return os;
+	case cpu_topology_level::processor:
+		cc::write(os, "processor");
+		return os;
+	default:
+		cc::write(os, "unknown");
+		return os;
+	}
+}
+
+/*
+** Note that this enum's name is not prefixed by `cpu_`, because we could
+** potentially use this enum to describe the cache types of several different
+** kinds of processors.
+*/
+enum class cache_type : uint8_t
 {
 	instruction,
 	data,
@@ -116,230 +176,244 @@ std::ostream& operator<<(std::ostream& os, const cache_type& t)
 	}
 }
 
-class cache
+class cpu_cache final
 {
-	bool m_self_init{};
-	bool m_fully_assoc{};
-	bool m_inv_propagation{};
-	bool m_inclusive{};
-	bool m_direct{};
+	cache_type m_type;
+	bool m_self_init;
+	bool m_fully_assoc;
+	bool m_inv_propagation;
+	bool m_inclusive;
+	bool m_direct;
 
-	cache_type m_type{};
-	uint8_t m_level{};
-	uint32_t m_sharing_threads{};
-	uint32_t m_size{};
-	uint32_t m_sets{};
-	uint32_t m_line_size{};
-	uint32_t m_line_partitions{};
-	uint32_t m_assoc{};
+	cpu_topology_level m_scope;
+	uint8_t m_level;
+	uint32_t m_size;
+	uint32_t m_sets;
+	uint32_t m_line_size;
+	uint32_t m_line_partitions;
+	uint32_t m_assoc;
 public:
-	explicit cache() noexcept {}
+	explicit cpu_cache() noexcept {}
 
-	DEFINE_COPY_GETTER_SETTER(cache, is_self_initializing, m_self_init)
-	DEFINE_COPY_GETTER_SETTER(cache, is_fully_associative, m_fully_assoc)
-	DEFINE_COPY_GETTER_SETTER(cache, has_invalidate_propagation, m_inv_propagation)
-	DEFINE_COPY_GETTER_SETTER(cache, is_inclusive, m_inv_propagation)
-	DEFINE_COPY_GETTER_SETTER(cache, is_direct_mapped, m_direct)
+	DEFINE_COPY_GETTER_SETTER(cpu_cache, type, m_type)
+	DEFINE_COPY_GETTER_SETTER(cpu_cache, is_self_initializing, m_self_init)
+	DEFINE_COPY_GETTER_SETTER(cpu_cache, is_fully_associative, m_fully_assoc)
+	DEFINE_COPY_GETTER_SETTER(cpu_cache, has_invalidate_propagation, m_inv_propagation)
+	DEFINE_COPY_GETTER_SETTER(cpu_cache, is_inclusive, m_inv_propagation)
+	DEFINE_COPY_GETTER_SETTER(cpu_cache, is_direct_mapped, m_direct)
 
-	DEFINE_COPY_GETTER_SETTER(cache, type, m_type)
-	DEFINE_COPY_GETTER_SETTER(cache, level, m_level)
-	DEFINE_COPY_GETTER_SETTER(cache, sharing_threads, m_sharing_threads)
-	DEFINE_COPY_GETTER_SETTER(cache, size, m_size)
-	DEFINE_COPY_GETTER_SETTER(cache, sets, m_sets)
-	DEFINE_COPY_GETTER_SETTER(cache, line_size, m_line_size)
-	DEFINE_COPY_GETTER_SETTER(cache, line_partitions, m_line_partitions)
-	DEFINE_COPY_GETTER_SETTER(cache, associativity, m_assoc)
+	DEFINE_COPY_GETTER_SETTER(cpu_cache, scope, m_scope)
+	DEFINE_COPY_GETTER_SETTER(cpu_cache, level, m_level)
+	DEFINE_COPY_GETTER_SETTER(cpu_cache, size, m_size)
+	DEFINE_COPY_GETTER_SETTER(cpu_cache, sets, m_sets)
+	DEFINE_COPY_GETTER_SETTER(cpu_cache, line_size, m_line_size)
+	DEFINE_COPY_GETTER_SETTER(cpu_cache, line_partitions, m_line_partitions)
+	DEFINE_COPY_GETTER_SETTER(cpu_cache, associativity, m_assoc)
 };
 
-std::ostream& operator<<(std::ostream& os, const cache& c)
+std::ostream& operator<<(std::ostream& os, const cpu_cache& c)
 {
-	cc::write(os, "L${num} $ cache (${data})", c.level(), c.type(), c.size());
+	cc::write(os, "L${num} $ cache (${data}, per $)",
+		c.level(), c.type(), c.size(), c.scope());
 	return os;
 }
 
-class core;
-class processor_package;
-
-/*
-** Every hardware execution resource is mapped to a thread in the virtual
-** hierarchy, even if the processor does not support SMT. Therefore, in virtual
-** hierarchy, each core of a processor contains at least one thread.
-*/
-class thread
+class cpu_thread_info final
 {
-	core* m_core{};
-
-	/*
-	** This information is only available if the process is able to run on
-	** the associated thread.
-	*/
-	boost::optional<uint32_t> m_x2apic_id{};
-	boost::optional<uint32_t> m_os_id{};
+	uint32_t m_os_id;
+	uint32_t m_x2apic_id;
 public:
-	explicit thread() noexcept {}
+	explicit cpu_thread_info() noexcept {}
 
-	class core& core() { return *m_core; }
-	const class core& core() const { return *m_core; }
-
-	DEFINE_COPY_GETTER_SETTER(thread, x2apic_id, m_x2apic_id)
-	DEFINE_COPY_GETTER_SETTER(thread, os_id, m_os_id)
+	DEFINE_REF_GETTER_SETTER(cpu_thread_info, os_id, m_os_id)
+	DEFINE_REF_GETTER_SETTER(cpu_thread_info, x2apic_id, m_x2apic_id)
 };
 
-std::ostream& operator<<(std::ostream& os, const thread& t)
+std::ostream& operator<<(std::ostream& os, const cpu_thread_info& i)
 {
-	cc::write(os, "thread: {x2APIC ID: $, OS ID: $}",
-		t.x2apic_id(), t.os_id());
+	//cc::write(os, "CPU thread: {x2APIC ID: $, OS ID: $}",
+	//	i.x2apic_id(), i.os_id());
+	std::cout << i.x2apic_id() << " " << i.os_id() << std::endl;
 	return os;
 }
 
-class core
+class local_cpu_info final
 {
-	std::vector<thread*> m_threads{};
-	std::vector<cache*> m_caches{};
-	processor_package* m_pkg{};
-
-	/*
-	** This information is only available if the process is able to run on
-	** the associated core.
-	*/
-	boost::optional<uint32_t> m_x2apic_id{};
-	boost::optional<uint8_t> m_avail_threads{};
+	cpu_thread_info* m_thread_data;
+	uint8_t m_avail_threads;
+	uint8_t m_uses_smt;
 public:
-	explicit core() noexcept {}
+	explicit local_cpu_info() noexcept {}
 
-	processor_package& package()
-	{ return *m_pkg; }
+	cpu_thread_info& thread_info(uint8_t i)
+	noexcept { return m_thread_data[i]; }
 
-	const processor_package& package() const
-	{ return *m_pkg; }
+	const cpu_thread_info& thread_info(uint8_t i)
+	const noexcept { return m_thread_data[i]; }
 
-	size_t total_threads() const { return m_threads.size(); }
-	class thread& thread(size_t i) { return *m_threads[i]; }
-	const class thread& thread(size_t i) const { return *m_threads[i]; }
-
-	size_t caches() const { return m_caches.size(); }
-	class cache& cache(size_t i) { return *m_caches[i]; }
-	const class cache& cache(size_t i) const { return *m_caches[i]; }
-
-	void add(class thread& t) { m_threads.push_back(&t); }
-	void add(class cache& c) { m_caches.push_back(&c); }
-
-	DEFINE_COPY_GETTER_SETTER(core, x2apic_id, m_x2apic_id)
-	DEFINE_COPY_GETTER_SETTER(core, available_threads, m_avail_threads)
+	DEFINE_COPY_GETTER_SETTER(local_cpu_info, thread_data, m_thread_data)
+	DEFINE_COPY_GETTER_SETTER(local_cpu_info, available_threads, m_avail_threads)
+	DEFINE_COPY_GETTER_SETTER(local_cpu_info, uses_smt, m_uses_smt)
 };
 
-std::ostream& operator<<(std::ostream& os, const core& c)
+std::ostream& operator<<(std::ostream& os, const local_cpu_info& i)
 {
-	cc::write(os, "core: {x2APIC ID: $, available threads: $/$}",
-		c.x2apic_id(), c.available_threads(), c.total_threads());
-	return os;
-}
-
-class processor_package
-{
-	std::vector<thread> m_threads{};
-	std::vector<core> m_cores{};
-	std::vector<cache> m_caches{};
-	vendor m_vendor{};
-	processor_version m_version{};
-
-	/*
-	** This information is only available if the process is able to run on
-	** the associated processor.
-	*/
-	boost::optional<uint32_t> m_x2apic_id{};
-	boost::optional<uint8_t> m_avail_cores{};
-	boost::optional<uint8_t> m_avail_threads{};
-	boost::optional<bool> m_uses_smt{};
-public:
-	explicit processor_package() noexcept {}
-
-	size_t total_threads() const { return m_threads.size(); }
-	class thread& thread(size_t i) { return m_threads[i]; }
-	const class thread& thread(size_t i) const { return m_threads[i]; }
-
-	size_t total_cores() const { return m_cores.size(); }
-	class core& core(size_t i) { return m_cores[i]; }
-	const class core& core(size_t i) const { return m_cores[i]; }
-
-	size_t caches() const { return m_caches.size(); }
-	class cache& cache(size_t i) { return m_caches[i]; }
-	const class cache& cache(size_t i) const { return m_caches[i]; }
-
-	void add(class thread& t) { m_threads.push_back(t); }
-	void add(class core& c) { m_cores.push_back(c); }
-	void add(class cache& c) { m_caches.push_back(c); }
-
-	DEFINE_COPY_GETTER_SETTER(processor_package, vendor, m_vendor)
-	DEFINE_REF_GETTER_SETTER(processor_package, version, m_version)
-	DEFINE_REF_GETTER_SETTER(processor_package, x2apic_id, m_x2apic_id)
-	DEFINE_COPY_GETTER_SETTER(processor_package, uses_smt, m_uses_smt)
-	DEFINE_COPY_GETTER_SETTER(processor_package, available_cores, m_avail_cores)
-	DEFINE_COPY_GETTER_SETTER(processor_package, available_threads, m_avail_threads)
-};
-
-std::ostream& operator<<(std::ostream& os, const processor_package& p)
-{
-	cc::write(os, "processor: {version: ${quote}, x2APIC ID: $,
-		available cores: $/$}", p.version(), p.x2apic_id(),
-		p.available_cores(), p.total_cores());
+	cc::write(os, "CPU package: {available threads: ${num}, uses SMT: ${bool}}",
+		i.available_threads(), i.uses_smt());
 	return os;
 }
 
 /*
-** For now, we assume that a NUMA node can only contain a single processor
-** package.
+** TODO implement the following methods:
+**   - get apic id of processor:
+**     - thread_id(uint32_t, const global_cpu_info&)
+**     - core_id(uint32_t, const global_cpu_info&)
+**     - processor_id(uint32_t, const global_cpu_info&)
+**   - get neighbor count of local thread info object (the only level for which
+**   this makes sense is the core level, since the local processor info object
+**   contains info about neighbors at the processor level)
+**   - define function that can be used to compare two different local thread
+**   info objects, given a global_thread_info object
 */
-class numa_node
+
+class global_cpu_info final
 {
-	processor_package m_pkg{};
-	int m_id{};
-	bool m_is_avail{};
+	std::vector<cpu_cache> m_caches{};
+	cpu_version m_version{};
+	uint8_t m_total_threads;
+	uint8_t m_total_cores;
+	uint8_t m_smt_id_bits;
+	uint8_t m_core_id_bits;
+	uint8_t m_pkg_id_bits;
 public:
-	explicit numa_node(
-		const processor_package& pkg,
-		bool is_accessible
-	) noexcept : m_pkg{pkg}, m_is_avail{is_avail}
+	explicit global_cpu_info() noexcept {}
+
+	size_t caches() const { return m_caches.size(); }
+	class cpu_cache& cache(size_t i) { return m_caches[i]; }
+	const class cpu_cache& cache(size_t i) const { return m_caches[i]; }
+	void add(class cpu_cache& c) { m_caches.push_back(c); }
+
+	uint8_t threads_per_core() const noexcept
+	{ return m_total_threads / m_total_cores; }
+
+	DEFINE_REF_GETTER_SETTER(global_cpu_info, version, m_version)
+	DEFINE_COPY_GETTER_SETTER(global_cpu_info, total_threads, m_total_threads)
+	DEFINE_COPY_GETTER_SETTER(global_cpu_info, total_cores, m_total_cores)
+	DEFINE_COPY_GETTER_SETTER(global_cpu_info, smt_id_bits, m_smt_id_bits)
+	DEFINE_COPY_GETTER_SETTER(global_cpu_info, core_id_bits, m_core_id_bits)
+	DEFINE_COPY_GETTER_SETTER(global_cpu_info, package_id_bits, m_pkg_id_bits)
+};
+
+std::ostream& operator<<(std::ostream& os, const global_cpu_info& i)
+{
+	cc::write(os, "CPU package: {version: ${quote}, total cores: ${num}, "
+		"total threads: ${num}}", i.version(), i.total_cores(),
+		i.total_threads());
+	return os;
+}
+
+class numa_node_info final
+{
+	local_cpu_info m_cpu_info{};
+	uint32_t m_id{};
+public:
+	explicit numa_node_info() noexcept {}
+
+	class local_cpu_info& cpu_info()
+	noexcept { return m_cpu_info; }
+
+	const class local_cpu_info& cpu_info()
+	const noexcept { return m_cpu_info; }
+
+	DEFINE_COPY_GETTER_SETTER(numa_node_info, id, m_id)
+};
+
+std::ostream& operator<<(std::ostream& os, const numa_node_info& i)
+{
+	cc::write(os, "NUMA node: ID $", i.id());
+	return os;
+}
+
+/*
+** TODO: Implement the following as *global functions*:
+** - Obtaining the size of a NUMA node (total memory).
+** - Allocation and deallocation.
+** - Changing the allocation policy for the node.
+*/
+
+class system_info final
+{
+public:
+	global_cpu_info m_cpu_info{};
+	std::vector<numa_node_info> m_node_info{};
+	std::vector<cpu_thread_info> m_cpu_thread_info{};
+	uint32_t m_total_nodes;
+public:
+	explicit system_info() noexcept {}
+
+	size_t total_numa_nodes() const noexcept
+	{ return m_total_nodes; }
+
+	size_t total_cpu_threads() const noexcept
+	{ return m_total_nodes * m_cpu_info.total_threads(); }
+
+	size_t available_numa_nodes() const noexcept
+	{ return m_node_info.size(); }
+
+	size_t available_cpu_threads() const noexcept
+	{ return m_cpu_thread_info.size(); }
+
+	system_info& total_numa_nodes(size_t n) noexcept
 	{
-		auto tid = pkg.core(0).thread(0).os_id();
-		m_id = ::numa_node_of_cpu(tid);
-		if (m_id == -1) {
-			throw std::system_error{errno, std::system_category(),
-				"failed to get NUMA node of CPU"};
-		}
+		m_total_nodes = n;
+		return *this;
 	}
 
-	/*
-	** TODO: Implement the following as *global functions*:
-	** - Obtaining the size of a NUMA node (total memory).
-	** - Allocation and deallocation.
-	** - Changing the allocation policy for the node.
-	*/
+	system_info& available_numa_nodes(size_t n)
+	{
+		m_node_info.resize(n);
+		return *this;
+	}
 
-	bool is_available() const noexcept
-	{ return m_is_avail; }
+	system_info& available_cpu_threads(size_t n)
+	{
+		m_cpu_thread_info.resize(n);
+		return *this;
+	}
 
-	class processor_package& processor_package()
-	noexcept { return m_pkg; }
+	void add(const numa_node_info& n) { m_node_info.push_back(n); }
+	void add(const cpu_thread_info& i) { m_cpu_thread_info.push_back(i); }
 
-	const class processor_package& processor_package()
-	const noexcept { return m_pkg; }
+	global_cpu_info& cpu_info() noexcept
+	{ return m_cpu_info; }
+
+	const global_cpu_info& cpu_info() const noexcept
+	{ return m_cpu_info; }
+
+	class numa_node_info&
+	numa_node_info(size_t i) noexcept
+	{ return m_node_info[i]; }
+
+	const class numa_node_info&
+	numa_node_info(size_t i) const noexcept
+	{ return m_node_info[i]; }
+
+	class cpu_thread_info&
+	cpu_thread_info(size_t i) noexcept
+	{ return m_cpu_thread_info[i]; }
+
+	const class cpu_thread_info&
+	cpu_thread_info(size_t i) const noexcept
+	{ return m_cpu_thread_info[i]; }
 };
 
-class system
+std::ostream& operator<<(std::ostream& os, const system_info& i)
 {
-	std::vector<numa_node> m_nodes{};
-	int m_avail_nodes{};
-public:
-	explicit system() noexcept {}
-
-	size_t total_numa_nodes() const { return m_nodes.size(); }
-	class numa_node&(size_t i) { return m_nodes[i]; }
-	const class numa_node&(size_t i) const { return m_nodes[i]; }
-	void add(const numa_node& pkg) { m_nodes.push_back(p); }
-
-	DEFINE_COPY_GETTER_SETTER(system, available_numa_nodes, m_avail_nodes)
-};
+	cc::write(os, "system info: {NUMA nodes available: $/$,  cpu threads available: $/$}",
+		i.available_numa_nodes(), i.total_numa_nodes(),
+		i.available_cpu_threads(), i.total_cpu_threads());
+	return os;
+}
 
 }
 

@@ -10,9 +10,23 @@
 
 int main()
 {
-	auto pkg = ctop::system_query().get();
-	cc::println(pkg);
-	for (auto i = 0; i != pkg.caches(); ++i) {
-		cc::println(pkg.cache(i));
+	auto info = ctop::system_query().get();
+
+	// Print global information.
+	cc::println(info);
+	cc::println(info.cpu_info());
+	for (auto i = size_t{0}; i != info.cpu_info().caches(); ++i) {
+		cc::println(info.cpu_info().cache(i));
+	}
+
+	// Print information local to each NUMA node.
+	for (auto i = size_t{0}; i != info.available_numa_nodes(); ++i) {
+		auto& node = info.numa_node_info(i);
+		auto& cpu = node.cpu_info();
+		cc::println(node);
+		cc::println(cpu);
+		for (auto j = size_t{0}; j != cpu.available_threads(); ++j) {
+			cc::println(cpu.thread_info(j));
+		}
 	}
 }
