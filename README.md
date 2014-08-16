@@ -37,10 +37,7 @@ hold. Otherwise, exceptions are thrown during runtime.
 - Support the following NUMA devices:
   - MICs
 
-- Range member functions for `info` objects. Use `boost::iterator_range`.
-- Sorting cpu thread info objects.
-- Setting HTT bit of each CPU. Assume that if there is only one logical CPU per
-core, then HTT is disabled.
+- Test on savina.
 
 # Scratch
 

@@ -393,8 +393,9 @@ get_cpu_topology_info(
 		return numa_error{"more CPU threads available than reported"};
 	}
 
-	node.cpu_info().available_threads(avail_threads);
-	node.cpu_info().thread_data(&info.available_cpu_threads()[cur_thread_count]);
+	auto& cpu = node.cpu_info();
+	cpu.available_threads(avail_threads);
+	cpu.thread_data(&info.available_cpu_threads()[cur_thread_count]);
 	cur_thread_count += avail_threads;
 
 	for (auto i = 0u; i != info.total_cpu_threads(); ++i) {
@@ -407,15 +408,21 @@ get_cpu_topology_info(
 				return numa_error{node.id(), msg};
 			}
 
-			auto& thread = node.cpu_info().available_threads()[i];
+			auto& thread = cpu.available_threads()[i];
 			thread.os_id(i);
 			std::tie(_, _, _, thread.x2apic_id()) = cpuid(leaf, 0);
 			::numa_bitmask_clearbit(cur_cpu, i);
 		}
 	}
 
-	// TODO sort the subrange of thread info objects
-	// TODO set SMT field of CPU
+	boost::sort(cpu.available_threads(),
+		[](const cpu_thread_info& lhs, const cpu_thread_info& rhs) {
+			return lhs.x2apic_id() < rhs.x2apic_id();
+		});
+
+	auto cores = info.cpu_info().total_cores();
+	cpu.uses_smt(avail_threads < cores || (avail_threads == cores &&
+		core_count(cpu.available_threads(), info.cpu_info()) == cores));
 	return cc::no_error;
 }
 

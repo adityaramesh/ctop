@@ -312,15 +312,9 @@ std::ostream& operator<<(std::ostream& os, const global_cpu_info& i)
 
 /*
 ** TODO implement the following methods:
-**   - get apic id of processor:
-**     - thread_id(uint32_t, const global_cpu_info&)
-**     - core_id(uint32_t, const global_cpu_info&)
-**     - processor_id(uint32_t, const global_cpu_info&)
 **   - get neighbor count of local thread info object (the only level for which
 **   this makes sense is the core level, since the local processor info object
 **   contains info about neighbors at the processor level)
-**   - define function that can be used to compare two different local thread
-**   info objects, given a global_thread_info object
 */
 
 uint32_t core_id(
@@ -337,6 +331,23 @@ uint32_t package_id(
 ) noexcept
 {
 	return thread.x2apic_id() >> (info.smt_id_bits() + info.core_id_bits());
+}
+
+template <class Range>
+uint32_t core_count(const Range& threads, const global_cpu_info& info)
+{
+	if (threads.size() == 0) {
+		return 0;
+	}
+	else if (threads.size() == 1) {
+		return 1;
+	}
+
+	auto count = uint32_t{};
+	for (auto i = size_t{}; i != size_t(threads.size() - 1); ++i) {
+		count += (core_id(threads[i], info) == core_id(threads[i + 1], info));
+	}
+	return count;
 }
 
 class numa_node_info final
@@ -436,7 +447,7 @@ public:
 std::ostream& operator<<(std::ostream& os, const system_info& i)
 {
 	cc::write(os, "system info: {NUMA nodes available: $/$,  cpu threads available: $/$}",
-		i.available_numa_nodes(), i.total_numa_nodes(),
+		i.available_numa_nodes().size(), i.total_numa_nodes(),
 		i.available_cpu_threads().size(), i.total_cpu_threads());
 	return os;
 }
