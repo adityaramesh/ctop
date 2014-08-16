@@ -10,23 +10,22 @@
 
 int main()
 {
-	auto info = ctop::system_query().get();
+	auto info = *ctop::system_query();
 
 	// Print global information.
 	cc::println(info);
 	cc::println(info.cpu_info());
-	for (auto i = size_t{0}; i != info.cpu_info().caches(); ++i) {
-		cc::println(info.cpu_info().cache(i));
+	for (const auto& cache : info.cpu_info().caches()) {
+		cc::println(cache);
 	}
 
 	// Print information local to each NUMA node.
-	for (auto i = size_t{0}; i != info.available_numa_nodes(); ++i) {
-		auto& node = info.numa_node_info(i);
+	for (const auto& node : info.available_numa_nodes()) {
 		auto& cpu = node.cpu_info();
 		cc::println(node);
 		cc::println(cpu);
-		for (auto j = size_t{0}; j != cpu.available_threads(); ++j) {
-			cc::println(cpu.thread_info(j));
+		for (const auto& thread : cpu.available_threads()) {
+			cc::println(thread);
 		}
 	}
 }

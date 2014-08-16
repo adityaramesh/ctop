@@ -37,61 +37,23 @@ hold. Otherwise, exceptions are thrown during runtime.
 - Support the following NUMA devices:
   - MICs
 
-- Assume that there is always an "SMT" level.
-- Do not assume that the hierarchical levels are reported in order with
-increasing values of ECX -- fix this issue in the code.
-- Assume that if there is only one logical CPU per core, then HTT is disabled.
-- Even cores and threads that are not accessible to the process should be added
-to the lists in the `processor_package` class.
-
-- Strategy overview
-  - Instantiate system object [DONE]
-  - Initialize global CPU info
-    - Caches [DONE]
-    - APIC sub-id mask widths [DONE]
-    - Processor counts using CPUID leaf 11 (but do not store APIC IDs yet) [DONE]
-  - Initialize NUMA info
-    - Get total NUMA nodes [DONE]
-    - Get available NUMA nodes [DONE]
-    - Get available CPU threads [DONE]
-    - For each NUMA node
-      - For each thread associated with the NUMA node
-        - Get the pointer to the back of the cpu_thread_info vector
-        - Add a new cpu_thread_info object to `system` with the APIC ID and OS
-	ID
-        - Increment a counter
-	- Set the thread info pointer and length fields of the associated
-	local_cpu_info object.
-
-***************************
-- XXX: add support for many CPU packages in the same NUMA node -- nehalem and
-future architectures may be like this
-***************************
+- Range member functions for `info` objects. Use `boost::iterator_range`.
+- Sorting cpu thread info objects.
+- Setting HTT bit of each CPU. Assume that if there is only one logical CPU per
+core, then HTT is disabled.
 
 # Scratch
 
-#if PLATFORM_COMPILER == PLATFORM_COMPILER_GCC || \
-    PLATFORM_COMPILER == PLATFORM_COMPILER_CLANG || \
-    PLATFORM_COMPILER == PLATFORM_COMPILER_ICC
-
-CC_CONST CC_ALWAYS_INLINE uint32_t 
-next_power_of_two(uint32_t x)
-{
-	return 1 << (32 - __builtin_clz(x - 1));
-}
-
-#else
-	#error "Unsupported compiler."
-#endif
-
-- Expected:
-  - alternative to `return true;` for expected<void> -- cc::no_error
-  - unit tests
-  - rewrite documentation
-    - mention lvalue/rvalue overloads for compatibility with move semantics
-    - mention CC_RETURN_ON_ERROR
-
-  - After merging expected changes to master:
-  - Convert library to CC_NO_DEBUG and CC_ASSERT
-  - Add final declarations where appropriate.
-  - Add info about CC_NO_DEBUG to documentation.
+	#if PLATFORM_COMPILER == PLATFORM_COMPILER_GCC || \
+	    PLATFORM_COMPILER == PLATFORM_COMPILER_CLANG || \
+	    PLATFORM_COMPILER == PLATFORM_COMPILER_ICC
+	
+	CC_CONST CC_ALWAYS_INLINE uint32_t 
+	next_power_of_two(uint32_t x)
+	{
+		return 1 << (32 - __builtin_clz(x - 1));
+	}
+	
+	#else
+		#error "Unsupported compiler."
+	#endif

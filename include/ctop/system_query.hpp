@@ -1,5 +1,5 @@
 /*
-** File Name: processor_query.hpp
+** File Name: system_query.hpp
 ** Author:    Aditya Ramesh
 ** Date:      07/29/2014
 ** Contact:   _@adityaramesh.com
@@ -173,7 +173,7 @@ get_basic_cpu_info(global_cpu_info& info)
 		return cpuid_error{cpuid_leaf::brand_string_part_1,
 			"failed to parse base frequency"};
 	}
-	return true;
+	return cc::no_error;
 }
 
 cc::expected<void>
@@ -201,7 +201,7 @@ get_cpu_layout_info(global_cpu_info& info)
 		}
 
 		if (type == 1) {
-			info.smt_id_bits(count);
+			info.smt_id_bits(shift);
 			smt_count = count;
 			if (smt_count > 2) {
 				return cpuid_error{leaf, "obtained count of "
@@ -237,7 +237,7 @@ get_cpu_layout_info(global_cpu_info& info)
 	}
 	info.package_id_bits(32 - info.smt_id_bits() - info.core_id_bits());
 	info.total_cores(info.total_threads() / smt_count);
-	return true;
+	return cc::no_error;
 }
 
 cc::expected<void>
@@ -253,7 +253,7 @@ get_cpu_cache_info(global_cpu_info& info)
 		auto c = cpu_cache{};
 
 		switch (type) {
-		case 0: return true;
+		case 0: return cc::no_error;
 		case 1: c.type(cache_type::data);        break;
 		case 2: c.type(cache_type::instruction); break;
 		case 3: c.type(cache_type::unified);     break;
@@ -290,7 +290,7 @@ get_cpu_cache_info(global_cpu_info& info)
 		std::tie(eax, ebx, ecx, edx) = cpuid(cpuid_leaf::enumerable_cache_info, level);
 		++level;
 	}
-	return true;
+	return cc::no_error;
 }
 
 cc::expected<void>
@@ -299,32 +299,23 @@ get_global_info(system_info& info)
 	auto& cpu = info.cpu_info();
 	{
 		auto r = get_basic_cpu_info(cpu);
-		cc::println("A");
 		if (!r) {
-			try {
-				std::rethrow_exception(r.exception());
-			}
-			catch (const std::exception& e) {
-				std::cout << e.what() << std::endl;
-			}
-			return r.exception();
+			return std::move(r).exception();
 		}
 	}
 	{
 		auto r = get_cpu_layout_info(cpu);
-		cc::println("B");
 		if (!r) {
-			return r.exception();
+			return std::move(r).exception();
 		}
 	}
 	{
 		auto r = get_cpu_cache_info(cpu);
-		cc::println("C");
 		if (!r) {
-			return r.exception();
+			return std::move(r).exception();
 		}
 	}
-	return true;
+	return cc::no_error;
 }
 
 cc::expected<void>
@@ -366,7 +357,7 @@ get_inventory(system_info& info)
 			"than total CPU threads"};
 	}
 	info.available_cpu_threads(count);
-	return true;
+	return cc::no_error;
 }
 
 cc::expected<void>
@@ -398,12 +389,12 @@ get_cpu_topology_info(
 		return numa_error{node.id(), "node reported accessible but "
 			"contains no usable CPU threads"};
 	}
-	if (cur_thread_count + avail_threads > info.available_cpu_threads()) {
+	if (cur_thread_count + avail_threads > info.available_cpu_threads().size()) {
 		return numa_error{"more CPU threads available than reported"};
 	}
 
 	node.cpu_info().available_threads(avail_threads);
-	node.cpu_info().thread_data(&info.cpu_thread_info(cur_thread_count));
+	node.cpu_info().thread_data(&info.available_cpu_threads()[cur_thread_count]);
 	cur_thread_count += avail_threads;
 
 	for (auto i = 0u; i != info.total_cpu_threads(); ++i) {
@@ -416,17 +407,16 @@ get_cpu_topology_info(
 				return numa_error{node.id(), msg};
 			}
 
-			auto& thread = node.cpu_info().thread_info(i);
+			auto& thread = node.cpu_info().available_threads()[i];
 			thread.os_id(i);
 			std::tie(_, _, _, thread.x2apic_id()) = cpuid(leaf, 0);
-
 			::numa_bitmask_clearbit(cur_cpu, i);
 		}
 	}
 
-	// TODO set SMT field of CPU
 	// TODO sort the subrange of thread info objects
-	return true;
+	// TODO set SMT field of CPU
+	return cc::no_error;
 }
 
 cc::expected<void>
@@ -450,7 +440,7 @@ get_numa_topology_info(system_info& info)
 		}
 	};
 
-	if (::numa_bitmask_weight(nodes) != info.available_numa_nodes()) {
+	if (::numa_bitmask_weight(nodes) != info.available_numa_nodes().size()) {
 		return numa_error{"conflicting available node counts"};
 	}
 	if (cpus == nullptr || cur_cpu == nullptr) {
@@ -460,20 +450,20 @@ get_numa_topology_info(system_info& info)
 	auto cur_thread_count = uint32_t{};
 	for (auto i = 0; i != max_node; ++i) {
 		if (::numa_bitmask_isbitset(nodes, i)) {
-			auto& node = info.numa_node_info(i).id(i);
+			auto& node = info.available_numa_nodes()[i].id(i);
 			auto r = get_cpu_topology_info(cur_thread_count, cpus,
 				cur_cpu, node, info);
 			if (!r) {
-				return r.exception();
+				return std::move(r).exception();
 			}
 		}
 	}
 
-	if (cur_thread_count != info.available_cpu_threads()) {
+	if (cur_thread_count != info.available_cpu_threads().size()) {
 		return numa_error{"number of CPU threads actually accessible "
 			"does not match reported count"};
 	}
-	return true;
+	return cc::no_error;
 }
 
 cc::expected<void>
@@ -482,16 +472,16 @@ get_numa_info(system_info& info)
 	{
 		auto r = get_inventory(info);
 		if (!r) {
-			return r.exception();
+			return std::move(r).exception();
 		}
 	}
 	{
 		auto r = get_numa_topology_info(info);
 		if (!r) {
-			return r.exception();
+			return std::move(r).exception();
 		}
 	}
-	return true;
+	return cc::no_error;
 }
 
 cc::expected<system_info>
@@ -509,12 +499,11 @@ system_query()
 	auto info = system_info{};
 	{
 		auto r = get_global_info(info);
-		cc::println(r.valid());
-		if (!r) return r.exception();
+		if (!r) return std::move(r).exception();
 	}
 	{
 		auto r = get_numa_info(info);
-		if (!r) return r.exception();
+		if (!r) return std::move(r).exception();
 	}
 	return info;
 }

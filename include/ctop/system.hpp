@@ -12,6 +12,7 @@
 #include <vector>
 #include <ostream>
 
+#include <boost/range/iterator_range.hpp>
 #include <boost/utility/string_ref.hpp>
 #include <ccbase/format.hpp>
 #include <ccbase/utility.hpp>
@@ -231,9 +232,8 @@ public:
 
 std::ostream& operator<<(std::ostream& os, const cpu_thread_info& i)
 {
-	//cc::write(os, "CPU thread: {x2APIC ID: $, OS ID: $}",
-	//	i.x2apic_id(), i.os_id());
-	std::cout << i.x2apic_id() << " " << i.os_id() << std::endl;
+	cc::write(os, "CPU thread: {x2APIC ID: $, OS ID: $}",
+		i.x2apic_id(), i.os_id());
 	return os;
 }
 
@@ -242,39 +242,29 @@ class local_cpu_info final
 	cpu_thread_info* m_thread_data;
 	uint8_t m_avail_threads;
 	uint8_t m_uses_smt;
+
+	using thread_range       = boost::iterator_range<cpu_thread_info*>;
+	using const_thread_range = boost::iterator_range<const cpu_thread_info*>;
 public:
 	explicit local_cpu_info() noexcept {}
 
-	cpu_thread_info& thread_info(uint8_t i)
-	noexcept { return m_thread_data[i]; }
+	thread_range available_threads() noexcept
+	{ return {m_thread_data, m_thread_data + m_avail_threads}; }
 
-	const cpu_thread_info& thread_info(uint8_t i)
-	const noexcept { return m_thread_data[i]; }
+	const_thread_range available_threads() const noexcept
+	{ return {m_thread_data, m_thread_data + m_avail_threads}; }
 
-	DEFINE_COPY_GETTER_SETTER(local_cpu_info, thread_data, m_thread_data)
-	DEFINE_COPY_GETTER_SETTER(local_cpu_info, available_threads, m_avail_threads)
+	DEFINE_SETTER(local_cpu_info, thread_data, m_thread_data)
+	DEFINE_SETTER(local_cpu_info, available_threads, m_avail_threads)
 	DEFINE_COPY_GETTER_SETTER(local_cpu_info, uses_smt, m_uses_smt)
 };
 
 std::ostream& operator<<(std::ostream& os, const local_cpu_info& i)
 {
 	cc::write(os, "CPU package: {available threads: ${num}, uses SMT: ${bool}}",
-		i.available_threads(), i.uses_smt());
+		i.available_threads().size(), i.uses_smt());
 	return os;
 }
-
-/*
-** TODO implement the following methods:
-**   - get apic id of processor:
-**     - thread_id(uint32_t, const global_cpu_info&)
-**     - core_id(uint32_t, const global_cpu_info&)
-**     - processor_id(uint32_t, const global_cpu_info&)
-**   - get neighbor count of local thread info object (the only level for which
-**   this makes sense is the core level, since the local processor info object
-**   contains info about neighbors at the processor level)
-**   - define function that can be used to compare two different local thread
-**   info objects, given a global_thread_info object
-*/
 
 class global_cpu_info final
 {
@@ -285,12 +275,20 @@ class global_cpu_info final
 	uint8_t m_smt_id_bits;
 	uint8_t m_core_id_bits;
 	uint8_t m_pkg_id_bits;
+
+	using cache_iterator       = decltype(m_caches.begin());
+	using const_cache_iterator = decltype(m_caches.cbegin());
+	using cache_range          = boost::iterator_range<cache_iterator>;
+	using const_cache_range    = boost::iterator_range<const_cache_iterator>;
 public:
 	explicit global_cpu_info() noexcept {}
 
-	size_t caches() const { return m_caches.size(); }
-	class cpu_cache& cache(size_t i) { return m_caches[i]; }
-	const class cpu_cache& cache(size_t i) const { return m_caches[i]; }
+	cache_range caches() noexcept
+	{ return {m_caches.begin(), m_caches.end()}; }
+
+	const_cache_range caches() const noexcept
+	{ return {m_caches.cbegin(), m_caches.cend()}; }
+
 	void add(class cpu_cache& c) { m_caches.push_back(c); }
 
 	uint8_t threads_per_core() const noexcept
@@ -310,6 +308,35 @@ std::ostream& operator<<(std::ostream& os, const global_cpu_info& i)
 		"total threads: ${num}}", i.version(), i.total_cores(),
 		i.total_threads());
 	return os;
+}
+
+/*
+** TODO implement the following methods:
+**   - get apic id of processor:
+**     - thread_id(uint32_t, const global_cpu_info&)
+**     - core_id(uint32_t, const global_cpu_info&)
+**     - processor_id(uint32_t, const global_cpu_info&)
+**   - get neighbor count of local thread info object (the only level for which
+**   this makes sense is the core level, since the local processor info object
+**   contains info about neighbors at the processor level)
+**   - define function that can be used to compare two different local thread
+**   info objects, given a global_thread_info object
+*/
+
+uint32_t core_id(
+	const cpu_thread_info& thread,
+	const global_cpu_info& info
+) noexcept
+{
+	return thread.x2apic_id() >> info.smt_id_bits();
+}
+
+uint32_t package_id(
+	const cpu_thread_info& thread,
+	const global_cpu_info& info
+) noexcept
+{
+	return thread.x2apic_id() >> (info.smt_id_bits() + info.core_id_bits());
 }
 
 class numa_node_info final
@@ -343,11 +370,20 @@ std::ostream& operator<<(std::ostream& os, const numa_node_info& i)
 
 class system_info final
 {
-public:
 	global_cpu_info m_cpu_info{};
 	std::vector<numa_node_info> m_node_info{};
 	std::vector<cpu_thread_info> m_cpu_thread_info{};
 	uint32_t m_total_nodes;
+
+	using numa_node_iterator       = decltype(m_node_info.begin());
+	using const_numa_node_iterator = decltype(m_node_info.cbegin());
+	using numa_node_range          = boost::iterator_range<numa_node_iterator>;
+	using const_numa_node_range    = boost::iterator_range<const_numa_node_iterator>;
+
+	using cpu_thread_iterator       = decltype(m_cpu_thread_info.begin());
+	using const_cpu_thread_iterator = decltype(m_cpu_thread_info.cbegin());
+	using cpu_thread_range          = boost::iterator_range<cpu_thread_iterator>;
+	using const_cpu_thread_range    = boost::iterator_range<const_cpu_thread_iterator>;
 public:
 	explicit system_info() noexcept {}
 
@@ -356,12 +392,6 @@ public:
 
 	size_t total_cpu_threads() const noexcept
 	{ return m_total_nodes * m_cpu_info.total_threads(); }
-
-	size_t available_numa_nodes() const noexcept
-	{ return m_node_info.size(); }
-
-	size_t available_cpu_threads() const noexcept
-	{ return m_cpu_thread_info.size(); }
 
 	system_info& total_numa_nodes(size_t n) noexcept
 	{
@@ -384,34 +414,30 @@ public:
 	void add(const numa_node_info& n) { m_node_info.push_back(n); }
 	void add(const cpu_thread_info& i) { m_cpu_thread_info.push_back(i); }
 
+	numa_node_range available_numa_nodes() noexcept
+	{ return {m_node_info.begin(), m_node_info.end()}; }
+
+	const_numa_node_range available_numa_nodes() const noexcept
+	{ return {m_node_info.cbegin(), m_node_info.cend()}; }
+
+	cpu_thread_range available_cpu_threads() noexcept
+	{ return {m_cpu_thread_info.begin(), m_cpu_thread_info.end()}; }
+
+	const_cpu_thread_range available_cpu_threads() const noexcept
+	{ return {m_cpu_thread_info.cbegin(), m_cpu_thread_info.cend()}; }
+
 	global_cpu_info& cpu_info() noexcept
 	{ return m_cpu_info; }
 
 	const global_cpu_info& cpu_info() const noexcept
 	{ return m_cpu_info; }
-
-	class numa_node_info&
-	numa_node_info(size_t i) noexcept
-	{ return m_node_info[i]; }
-
-	const class numa_node_info&
-	numa_node_info(size_t i) const noexcept
-	{ return m_node_info[i]; }
-
-	class cpu_thread_info&
-	cpu_thread_info(size_t i) noexcept
-	{ return m_cpu_thread_info[i]; }
-
-	const class cpu_thread_info&
-	cpu_thread_info(size_t i) const noexcept
-	{ return m_cpu_thread_info[i]; }
 };
 
 std::ostream& operator<<(std::ostream& os, const system_info& i)
 {
 	cc::write(os, "system info: {NUMA nodes available: $/$,  cpu threads available: $/$}",
 		i.available_numa_nodes(), i.total_numa_nodes(),
-		i.available_cpu_threads(), i.total_cpu_threads());
+		i.available_cpu_threads().size(), i.total_cpu_threads());
 	return os;
 }
 
