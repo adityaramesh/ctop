@@ -38,6 +38,8 @@ hold. Otherwise, exceptions are thrown during runtime.
   - MICs
 
 - Test on savina.
+- Add support for AMD.
+- Test on fatalii (for AMD support).
 
 # Scratch
 
