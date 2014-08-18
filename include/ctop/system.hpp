@@ -340,8 +340,11 @@ uint32_t package_id(
 	return thread.x2apic_id() >> (info.smt_id_bits() + info.core_id_bits());
 }
 
+/*
+** Precondition: `threads` must be a sorted based on x2APIC IDs.
+*/
 template <class Range>
-uint32_t core_count(const Range& threads, const global_cpu_info& info)
+uint32_t count_unique_cores(const Range& threads, const global_cpu_info& info)
 {
 	if (threads.size() == 0) {
 		return 0;
@@ -350,9 +353,10 @@ uint32_t core_count(const Range& threads, const global_cpu_info& info)
 		return 1;
 	}
 
-	auto count = uint32_t{};
+	auto count = uint32_t{1};
 	for (auto i = size_t{}; i != size_t(threads.size() - 1); ++i) {
-		count += (core_id(threads[i], info) == core_id(threads[i + 1], info));
+		count += (core_id(threads[i], info) !=
+			core_id(threads[i + 1], info));
 	}
 	return count;
 }

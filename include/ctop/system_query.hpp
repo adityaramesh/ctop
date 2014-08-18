@@ -454,9 +454,25 @@ get_cpu_topology_info(
 			return lhs.x2apic_id() < rhs.x2apic_id();
 		});
 
-	auto cores = info.cpu_info().total_cores();
-	cpu.uses_smt(avail_threads < cores || (avail_threads == cores &&
-		core_count(cpu.available_threads(), info.cpu_info()) == cores));
+	if (cpu.available_threads().size() >= 2) {
+		for (auto i = 0u; i != cpu.available_threads().size() - 1; ++i) {
+			if (cpu.available_threads()[i].x2apic_id() ==
+				cpu.available_threads()[i + 1].x2apic_id())
+			{
+				return numa_error{node.id(), "detected "
+					"duplicate x2APIC IDs that should "
+					"have been obtained from different "
+					"hardware threads"};
+			}
+		}
+	}
+
+	auto total_cores = info.cpu_info().total_cores();
+	auto unique_cores = count_unique_cores(cpu.available_threads(),
+		info.cpu_info());
+
+	cpu.uses_smt(avail_threads > total_cores ||
+		unique_cores < avail_threads);
 	return cc::no_error;
 }
 

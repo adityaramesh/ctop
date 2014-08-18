@@ -30,7 +30,6 @@ hold. Otherwise, exceptions are thrown during runtime.
 
 # TODO
 
-- Add assertion to ensure that threads have unique APIC IDs.
 - Add support for AMD.
 - Test on fatalii (for AMD support).
 
