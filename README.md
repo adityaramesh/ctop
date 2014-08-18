@@ -30,16 +30,16 @@ hold. Otherwise, exceptions are thrown during runtime.
 
 # TODO
 
+- Add assertion to ensure that threads have unique APIC IDs.
+- Add support for AMD.
+- Test on fatalii (for AMD support).
+
 - Support the following auxiliary (PCIe) devices:
   - GPUs
   - MICs
 
 - Support the following NUMA devices:
   - MICs
-
-- Test on savina.
-- Add support for AMD.
-- Test on fatalii (for AMD support).
 
 # Scratch
 

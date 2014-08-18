@@ -9,6 +9,7 @@
 #define Z107EBA55_0D42_4C6A_9B3E_247F273597DE
 
 #include <array>
+#include <atomic>
 #include <algorithm>
 #include <stdexcept>
 #include <cstring>
@@ -27,7 +28,6 @@
 		#define _GNU_SOURCE
 	#endif
 
-	// For `sysconf`.
 	#include <unistd.h>
 	// For `CPU_SET`.
 	#include <sched.h>
@@ -37,10 +37,28 @@
 
 namespace ctop {
 
+#if PLATFORM_COMPILER == PLATFORM_COMPILER_GCC   || \
+    PLATFORM_COMPILER == PLATFORM_COMPILER_CLANG || \
+    PLATFORM_COMPILER == PLATFORM_COMPILER_ICC
+
+CC_CONST CC_ALWAYS_INLINE uint32_t 
+roundup_to_pot(uint32_t x)
+{
+	return 1 << (32 - __builtin_clz(x - 1));
+}
+
+#else
+	#error "Unsupported compiler."
+#endif
+
 cc::expected<void>
 get_basic_cpu_info(global_cpu_info& info)
 {
-	auto buf = std::array<char, 13>{};
+	static const auto _ = std::ignore;
+
+	std::array<char, 13> buf;
+	buf[12] = '\0';
+
 	auto regs = (uint32_t*)buf.data();
 	auto& eax = regs[0];
 	auto& ebx = regs[1];
@@ -66,7 +84,7 @@ get_basic_cpu_info(global_cpu_info& info)
 	/*
 	** Retrieve the version information.
 	*/
-	std::tie(eax, ebx, ecx, edx) = cpuid(cpuid_leaf::version_info);
+	std::tie(eax, ebx, _, edx) = cpuid(cpuid_leaf::version_info);
 
 	auto stepping   = eax & 0xF;
 	auto model      = (eax >> 4) & 0xF;
@@ -96,10 +114,17 @@ get_basic_cpu_info(global_cpu_info& info)
 		info.version().model(model);
 	}
 
+	auto htt_bit = edx & (1 << 28);
+	if (htt_bit) {
+		info.thread_ids_per_package(roundup_to_pot((ebx >> 16) & 0xFF));
+	}
+	else {
+		info.thread_ids_per_package(1);
+	}
+
 	/*
 	** Retrieve the brand information and the base frequency.
 	*/
-	static const auto _ = std::ignore;
 	std::tie(eax, _, _, _) = cpuid(cpuid_leaf::max_extended_leaf);
 	if (eax < 0x80000004u) {
 		return cpuid_error{cpuid_leaf::brand_string_part_1, "unsupported"};
@@ -264,12 +289,22 @@ get_cpu_cache_info(global_cpu_info& info)
 		c.is_self_initializing((eax >> 8) & 0x1);
 		c.is_fully_associative((eax >> 9) & 0x1);
 
-		auto sharing_ids = ((eax >> 14) & 0xFFF) + 1;
-		auto res_core_ids = (eax >> 26) + 1;
-		if (sharing_ids == info.threads_per_core()) {
+		info.core_ids_per_package(roundup_to_pot((eax >> 26) + 1));
+		if (info.thread_ids_per_package() < info.core_ids_per_package()) {
+			return cpuid_error{leaf, "fewer thread IDs per package "
+				"than core IDs per package"};
+		}
+		else if (info.thread_ids_per_package() % info.core_ids_per_package() != 0) {
+			return cpuid_error{leaf, "number of thread IDs per "
+				"package not a multiple of number of core "
+				"IDs per package"};
+		}
+
+		auto sharing_ids = roundup_to_pot(((eax >> 14) & 0xFFF) + 1);
+		if (sharing_ids == info.thread_ids_per_core()) {
 			c.scope(cpu_topology_level::core);
 		}
-		else if (sharing_ids == info.threads_per_core() * res_core_ids) {
+		else if (sharing_ids == info.thread_ids_per_package()) {
 			c.scope(cpu_topology_level::processor);
 		}
 		else {
@@ -319,7 +354,7 @@ get_global_info(system_info& info)
 }
 
 cc::expected<void>
-get_inventory(system_info& info)
+get_numa_inventory(system_info& info)
 {
 	if (::numa_available() == -1) {
 		return numa_error{"libnuma unavailable"};
@@ -398,7 +433,7 @@ get_cpu_topology_info(
 	cpu.thread_data(&info.available_cpu_threads()[cur_thread_count]);
 	cur_thread_count += avail_threads;
 
-	for (auto i = 0u; i != info.total_cpu_threads(); ++i) {
+	for (auto i = 0u, cur_thread = 0u; i != info.total_cpu_threads(); ++i) {
 		if (::numa_bitmask_isbitset(cpus, i)) {
 			::numa_bitmask_setbit(cur_cpu, i);
 			if (::numa_sched_setaffinity(0, cur_cpu) == -1) {
@@ -407,11 +442,11 @@ get_cpu_topology_info(
 					std::strerror(errno));
 				return numa_error{node.id(), msg};
 			}
+			::numa_bitmask_clearbit(cur_cpu, i);
 
-			auto& thread = cpu.available_threads()[i];
+			auto& thread = cpu.available_threads()[cur_thread++];
 			thread.os_id(i);
 			std::tie(_, _, _, thread.x2apic_id()) = cpuid(leaf, 0);
-			::numa_bitmask_clearbit(cur_cpu, i);
 		}
 	}
 
@@ -455,9 +490,9 @@ get_numa_topology_info(system_info& info)
 	}
 
 	auto cur_thread_count = uint32_t{};
-	for (auto i = 0; i != max_node; ++i) {
+	for (auto i = 0u, cur_node = 0u; i != (unsigned)max_node; ++i) {
 		if (::numa_bitmask_isbitset(nodes, i)) {
-			auto& node = info.available_numa_nodes()[i].id(i);
+			auto& node = info.available_numa_nodes()[cur_node++].id(i);
 			auto r = get_cpu_topology_info(cur_thread_count, cpus,
 				cur_cpu, node, info);
 			if (!r) {
@@ -477,7 +512,7 @@ cc::expected<void>
 get_numa_info(system_info& info)
 {
 	{
-		auto r = get_inventory(info);
+		auto r = get_numa_inventory(info);
 		if (!r) {
 			return std::move(r).exception();
 		}

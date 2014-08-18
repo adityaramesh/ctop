@@ -48,9 +48,6 @@ void print_cpu_info()
 			"level id: $, apic id: $.", level - 1, count,
 			level_type, level_id, r4);
 	}
-
-	std::tie(r1, r2, r3, r4) = ctop::cpuid(1);
-	cc::println((r2 & 0x00FF0000) >> 16);
 }
 
 int main()

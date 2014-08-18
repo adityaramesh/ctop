@@ -270,6 +270,8 @@ class global_cpu_info final
 {
 	std::vector<cpu_cache> m_caches{};
 	cpu_version m_version{};
+	uint8_t m_thread_ids_per_pkg{};
+	uint8_t m_core_ids_per_pkg{};
 	uint8_t m_total_threads;
 	uint8_t m_total_cores;
 	uint8_t m_smt_id_bits;
@@ -291,10 +293,15 @@ public:
 
 	void add(class cpu_cache& c) { m_caches.push_back(c); }
 
+	uint8_t thread_ids_per_core() const noexcept
+	{ return m_thread_ids_per_pkg / m_core_ids_per_pkg; }
+
 	uint8_t threads_per_core() const noexcept
 	{ return m_total_threads / m_total_cores; }
 
 	DEFINE_REF_GETTER_SETTER(global_cpu_info, version, m_version)
+	DEFINE_COPY_GETTER_SETTER(global_cpu_info, thread_ids_per_package, m_thread_ids_per_pkg)
+	DEFINE_COPY_GETTER_SETTER(global_cpu_info, core_ids_per_package, m_core_ids_per_pkg)
 	DEFINE_COPY_GETTER_SETTER(global_cpu_info, total_threads, m_total_threads)
 	DEFINE_COPY_GETTER_SETTER(global_cpu_info, total_cores, m_total_cores)
 	DEFINE_COPY_GETTER_SETTER(global_cpu_info, smt_id_bits, m_smt_id_bits)
