@@ -9,7 +9,6 @@
 #define Z107EBA55_0D42_4C6A_9B3E_247F273597DE
 
 #include <array>
-#include <atomic>
 #include <algorithm>
 #include <stdexcept>
 #include <cstring>
