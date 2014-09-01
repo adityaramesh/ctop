@@ -28,6 +28,11 @@ The following assumptions are made about the system on which this code is run:
 Where possible, the library statically checks to ensure that these assumptions
 hold. Otherwise, exceptions are thrown during runtime.
 
+# Usage
+
+This library is not ready for production yet! If you want to see some example
+usage, look at [this file](test/system_query_test.cpp).
+
 # TODO
 
 - Add support for AMD.
