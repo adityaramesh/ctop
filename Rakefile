@@ -1,7 +1,7 @@
 require 'rake/clean'
 
-cxx       = "g++" #ENV['CXX']
-boost     = "/usr/local/include" #ENV['BOOST_INCLUDE_PATH']
+cxx       = ENV['CXX']
+boost     = ENV['BOOST_INCLUDE_PATH']
 ccbase    = ENV['CCBASE_INCLUDE_PATH']
 langflags = "-std=c++1y"
 wflags    = "-Wall -Wextra -pedantic -Wno-unused-function -Wno-return-type-c-linkage"
@@ -33,7 +33,7 @@ end
 
 cxxflags = "#{langflags} #{wflags} #{archflags} #{incflags} #{optflags}"
 dirs = ["data", "out"]
-tests = test_sources.map{|f| f.sub(source_dir, "out").ext("run")}
+tests = [""] #test_sources.map{|f| f.sub(source_dir, "out").ext("run")}
 refs = reference_sources.map{|f| f.sub(reference_dir, "out").ext("run")}
 
 multitask :default => dirs + tests + refs

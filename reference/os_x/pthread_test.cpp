@@ -21,7 +21,7 @@
 #include <ccbase/error.hpp>
 #include <ccbase/format.hpp>
 
-std::mutex mtx;
+std::atomic<bool> barrier{false};
 
 cc::expected<uint32_t>
 get_integer_property(const char* name)
@@ -48,17 +48,19 @@ void* test(void* arg)
 		return nullptr;
 	}
 
+	std::cout << "Waiting..." << std::endl;
+	while (!barrier) {}
+	::pthread_yield_np();
+
 	uint32_t r1, r2, r3, r4;
 	std::tie(r1, r2, r3, r4) = ctop::cpuid(11, 0);
-	mtx.lock();
 	std::cout << "My x2APIC ID: " << std::hex << r4 << "." << std::endl;
-	mtx.unlock();
 	return nullptr;
 }
 
 int main()
 {
-	auto nprocs = get_integer_property("hw.logicalcpu").get();
+	auto nprocs = *get_integer_property("hw.logicalcpu");
 	auto threads = std::vector<::pthread_t>(nprocs);
 	auto tags = std::vector<int>(nprocs);
 	std::iota(tags.begin(), tags.end(), 0);
@@ -66,6 +68,7 @@ int main()
 	for (auto i = 0; i != nprocs; ++i) {
 		::pthread_create(&threads[i], nullptr, test, &tags[i]);
 	}
+	barrier = true;
 
 	for (auto i = 0; i != nprocs; ++i) {
 		::pthread_join(threads[i], nullptr);
