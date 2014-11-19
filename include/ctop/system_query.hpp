@@ -196,7 +196,6 @@ void get_basic_cpu_info(global_cpu_info& info)
 		throw cpuid_error{cpuid_leaf::brand_string_part_1,
 			"failed to parse base frequency"};
 	}
-	return cc::no_error;
 }
 
 void get_cpu_layout_info(global_cpu_info& info)
@@ -426,7 +425,7 @@ void get_cpu_topology_info(
 
 	boost::sort(cpu.available_threads(),
 		[](const cpu_thread_info& lhs, const cpu_thread_info& rhs) {
-			throw lhs.x2apic_id() < rhs.x2apic_id();
+			return lhs.x2apic_id() < rhs.x2apic_id();
 		});
 
 	if (cpu.available_threads().size() >= 2) {

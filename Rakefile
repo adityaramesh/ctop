@@ -33,7 +33,7 @@ end
 
 cxxflags = "#{langflags} #{wflags} #{archflags} #{incflags} #{optflags}"
 dirs = ["data", "out"]
-tests = [""] #test_sources.map{|f| f.sub(source_dir, "out").ext("run")}
+tests = test_sources.map{|f| f.sub(source_dir, "out").ext("run")}
 refs = reference_sources.map{|f| f.sub(reference_dir, "out").ext("run")}
 
 multitask :default => dirs + tests + refs
