@@ -1,62 +1,75 @@
 /*
-** File Name: thread_test.cpp
+** File Name: pthread_test.cpp
 ** Author:    Aditya Ramesh
-** Date:      07/31/2014
+** Date:      11/18/2014
 ** Contact:   _@adityaramesh.com
+**
+** Even if we create the threads in suspended states, and assign each thread a
+** distinct policy tag before starting the threads, the scheduler may still run
+** two threads with different policy tags on the same processor. So it seems
+** that this is the best we can do for OS X.
 */
 
-#include <cmath>
-#include <cstdint>
-#include <iostream>
-#include <system_error>
-
-#include <unistd.h>
-#include <mach/mach.h>
-#include <mach/mach_vm.h>
-#include <mach/mach_error.h>
-#include <mach/mach_init.h>
-#include <mach/mach_types.h>
-
-#include <mach/task.h>
+#include <pthread.h>
 #include <mach/thread_act.h>
 #include <mach/thread_policy.h>
-#include <mach/i386/thread_status.h>
 
-void check(kern_return_t err)
+#include <sys/types.h>
+#include <sys/sysctl.h>
+
+#include <numeric>
+#include <cstdint>
+#include <iostream>
+#include <vector>
+#include <system_error>
+#include <ctop/cpuid.hpp>
+#include <ccbase/error.hpp>
+#include <ccbase/format.hpp>
+
+cc::expected<uint32_t>
+get_integer_property(const char* name)
 {
-        if (err == KERN_SUCCESS) return;
-	throw std::runtime_error{::mach_error_string(err)};
+	auto buf = uint32_t{};
+	auto size = sizeof(buf);
+	if (::sysctlbyname(name, &buf, &size, nullptr, 0) != 0) {
+		return std::system_error{errno, std::system_category()};
+	}
+	return buf;
 }
 
-static void test()
+void* test(void* arg)
 {
-	std::puts("hello");
+	const auto _ = std::ignore;
+	auto r4 = uint32_t{};
+	std::tie(_, _, _, r4) = ctop::cpuid(11, 0);
+	std::cout << "My x2APIC ID: " << std::hex << r4 << "." << std::endl;
+	return nullptr;
 }
 
 int main()
 {
-        auto thread     = ::thread_t{};
-        auto task       = ::mach_task_self();
-        auto stack_size = 65536;
-        auto stack      = (::vm_address_t)nullptr;
-	check(::mach_vm_allocate(task, (::mach_vm_offset_t*)&stack, stack_size,
-		VM_FLAGS_ANYWHERE));
+	auto nprocs = *get_integer_property("hw.logicalcpu");
+	auto threads = std::vector<::pthread_t>(nprocs);
+	auto tags = std::vector<int>(nprocs);
+	auto cnt = THREAD_AFFINITY_POLICY_COUNT;
+	std::iota(tags.begin(), tags.end(), 0);
 
-        auto state     = ::x86_thread_state64_t{};
-        auto count     = ::mach_msg_type_number_t{x86_THREAD_STATE64_COUNT};
-        auto stack_ptr = stack + stack_size / 2 - 8;
-        state.__rip = (uintptr_t)test;
-        state.__rsp = (uintptr_t)stack_ptr;
-        state.__rbp = (uintptr_t)stack_ptr;
-
-	check(::thread_create_running(task, x86_THREAD_STATE64,
-		(thread_state_t)&state, x86_THREAD_STATE64_COUNT, &thread));
-        //::sleep(1);
-	auto c = 0;
-	for (auto i = 0ull; i != 100000000000; ++i) {
-		c += std::sin((float)i) * std::exp(1./i);
+	for (auto i = 0; i != nprocs; ++i) {
+		::pthread_create_suspended_np(&threads[i], nullptr, test, &tags[i]);
+		auto mth = ::pthread_mach_thread_np(threads[i]);
+		auto pol = ::thread_affinity_policy{i};
+		::thread_policy_set(
+			::pthread_mach_thread_np(threads[i]),
+			THREAD_AFFINITY_POLICY,
+			(::thread_policy_t)&pol, 1
+		);
 	}
-	std::cout << c << std::endl;
-        std::cout << "Done." << std::endl;
-	// TODO free thread reference
+
+	for (auto i = 0; i != nprocs; ++i) {
+		::thread_resume(::pthread_mach_thread_np(threads[i]));
+	}
+
+	for (auto i = 0; i != nprocs; ++i) {
+		::pthread_join(threads[i], nullptr);
+	}
 }
