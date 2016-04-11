@@ -16,6 +16,15 @@ system actually hold. Careful attention has been given to ensure that when
 something fails, a clear error message is produced that explains where things
 went wrong.
 
+# Agenda
+
+- Change line width to 100.
+- Throw instead of using `expected`.
+- Minimize dependencies to ccbase and boost.
+
+- For each core, add a mapping to the corresponding bit in CPU_SET.
+- Finish TODOs in the files.
+
 # Assumptions
 
 The following assumptions are made about the system on which this code is run:
@@ -33,10 +42,9 @@ hold. Otherwise, exceptions are thrown during runtime.
 This library is not ready for production yet! If you want to see some example
 usage, look at [this file](test/system_query_test.cpp).
 
-# TODO
+# Future Features
 
 - Add support for AMD.
-- Test on fatalii (for AMD support).
 
 - Support the following auxiliary (PCIe) devices:
   - GPUs
@@ -44,19 +52,3 @@ usage, look at [this file](test/system_query_test.cpp).
 
 - Support the following NUMA devices:
   - MICs
-
-# Scratch
-
-	#if PLATFORM_COMPILER == PLATFORM_COMPILER_GCC || \
-	    PLATFORM_COMPILER == PLATFORM_COMPILER_CLANG || \
-	    PLATFORM_COMPILER == PLATFORM_COMPILER_ICC
-	
-	CC_CONST CC_ALWAYS_INLINE uint32_t 
-	next_power_of_two(uint32_t x)
-	{
-		return 1 << (32 - __builtin_clz(x - 1));
-	}
-	
-	#else
-		#error "Unsupported compiler."
-	#endif
