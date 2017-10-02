@@ -62,6 +62,7 @@ int main()
 	cc::println("Processors online: $.", nprocs);
 
 	for (auto i = 0; i != nprocs; ++i) {
+		cc::println("Information for processor $:", i);
 		CPU_SET(i, &set);
 		check(::sched_setaffinity(0, sizeof(::cpu_set_t), &set));
 		CPU_CLR(i, &set);
